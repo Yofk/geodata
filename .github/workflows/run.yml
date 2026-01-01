@@ -42,7 +42,7 @@ jobs:
           # 1. 创建数据目录
           mkdir -p ./community/mydata/
           
-          # 2. 定义基础规则列表 (新增 tiktok, youtube)
+          # 2. 定义基础规则列表 (已添加 tiktok, youtube)
           archs=(private ads trackerslist microsoft-cn apple-cn google-cn games-cn media games ai networktest tld-proxy gfw proxy cn tiktok youtube)
 
           # 3. 下载上游规则并转换格式
@@ -61,7 +61,7 @@ jobs:
           EOF
           curl -sSL "${domains_download_url}/fakeip-filter.list" | awk '/^DOMAIN-REGEX,/ && !/ntp|stun|time/' | sed 's/DOMAIN-REGEX,/regexp:/' >> ./community/mydata/fakeip-filter
 
-          # 5. 生成 'download' 规则 (合并 skk.moe 和 deng2z.xyz)
+          # 5. 生成 'download' 规则
           echo "Generating custom 'download' rule..."
           curl -sSL "https://ruleset.skk.moe/Clash/domainset/download.txt" | sed 's/+\.//g' > ./temp_download_1
           curl -sSL "https://mihomo.deng2z.xyz/config/download.txt" | sed 's/+\.//g' > ./temp_download_2
@@ -72,7 +72,7 @@ jobs:
           echo "Appending custom direct list to 'cn' rule..."
           curl -sSL "https://mihomo.deng2z.xyz/config/direct.txt" | sed 's/+\.//g' >> ./community/mydata/cn
 
-          # 7. 编译 geosite (注意 outputname 已改为 geosite.dat)
+          # 7. 编译 geosite (确保文件名为 geosite.dat)
           cd ./community/
           go run ./ --datapath=./mydata/ --outputname geosite.dat
           cd ..
@@ -92,8 +92,7 @@ jobs:
           mkdir -p ./geoip-src/data
           rm -f ./geoip-src/data/*
 
-          # 1. 下载基础规则 (来源: DustinWin, 保持与原版一致)
-          # 注意：DustinWin 的文件名是 xxip.list，我们需要重命名为不带 ip 的标签名以便使用 (如 geoip:private)
+          # 1. 下载基础规则 (来源: DustinWin)
           echo "Downloading base IP lists..."
           wget -O ./geoip-src/data/cn "${ips_download_url}/cnip.list"
           wget -O ./geoip-src/data/private "${ips_download_url}/privateip.list"
@@ -101,31 +100,29 @@ jobs:
           wget -O ./geoip-src/data/games "${ips_download_url}/gamesip.list"
           wget -O ./geoip-src/data/telegram "${ips_download_url}/telegramip.list"
 
-          # 2. 生成 'bytedance' 规则 (来源: Loyalsoldier ASN CSV)
+          # 2. 生成 'bytedance' 规则
           echo "Generating 'bytedance' rule from ASN 396986..."
+          
+          # 创建临时目录
           mkdir -p ./temp_bd
-          cd ./temp_bd
           
-          # 下载并解压
-          wget "https://github.com/Loyalsoldier/geoip/raw/refs/heads/release/GeoLite2-ASN-CSV.zip"
-          unzip -q GeoLite2-ASN-CSV.zip
+          # 下载并解压到 ./temp_bd/ 目录
+          wget -O ./temp_bd/GeoLite2-ASN-CSV.zip "https://github.com/Loyalsoldier/geoip/raw/refs/heads/release/GeoLite2-ASN-CSV.zip"
+          unzip -q ./temp_bd/GeoLite2-ASN-CSV.zip -d ./temp_bd/
           
-          # 找到解压后的文件夹 (因为日期是动态的)
-          BD_DIR=$(find . -type d -name "GeoLite2-ASN-CSV_*")
+          # 查找解压后的文件夹路径（应对日期变化）
+          BD_DIR=$(find ./temp_bd -type d -name "GeoLite2-ASN-CSV_*")
           
-          # 提取 IPv4 和 IPv6 (ASN 396986)
-          # 使用 awk 精确匹配第二列 ASN 号，并打印第一列 CIDR
-          awk -F, '$2 == "396986" {print $1}' "$BD_DIR/GeoLite2-ASN-Blocks-IPv4.csv" > ../bytedance.txt
-          awk -F, '$2 == "396986" {print $1}' "$BD_DIR/GeoLite2-ASN-Blocks-IPv6.csv" >> ../bytedance.txt
+          # 直接提取并写入到 geoip-src/data/bytedance (修复了路径问题)
+          echo "Extracting IPs to ./geoip-src/data/bytedance..."
+          awk -F, '$2 == "396986" {print $1}' "$BD_DIR/GeoLite2-ASN-Blocks-IPv4.csv" > ./geoip-src/data/bytedance
+          awk -F, '$2 == "396986" {print $1}' "$BD_DIR/GeoLite2-ASN-Blocks-IPv6.csv" >> ./geoip-src/data/bytedance
           
-          cd ..
+          # 清理临时文件
           rm -rf ./temp_bd
           
-          # 移动到 data 目录
-          mv bytedance.txt ../geoip-src/data/bytedance
-          
           # 3. 编译 geoip
-          cd ../geoip-src
+          cd ./geoip-src
           echo "Compiling geoip.dat..."
           go run ./ --datapath=./data/ --outputname=geoip.dat
           cd ..
@@ -136,7 +133,9 @@ jobs:
       - name: Prepare Assets
         run: |
           mkdir -p ./publish/
+          # 移动生成的 geosite.dat
           mv ./community/geosite.dat ./publish/
+          # 移动生成的 geoip.dat
           mv ./geoip-src/geoip.dat ./publish/
 
       - name: Release and Upload Assets
