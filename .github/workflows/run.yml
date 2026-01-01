@@ -17,7 +17,6 @@ jobs:
         run: |
           echo "update_version=$(date -d '+8 hours' +%Y-%m-%d)" >> ${GITHUB_ENV}
           echo "domains_download_url=https://github.com/DustinWin/domain-list-custom/releases/download/domains" >> ${GITHUB_ENV}
-          echo "ips_download_url=https://github.com/DustinWin/geoip/releases/download/ips" >> ${GITHUB_ENV}
         shell: bash
 
       - name: Checkout Repository
@@ -70,7 +69,7 @@ jobs:
           cd ..
 
       # ------------------------------------------------------------------------
-      # 任务二：构建 GeoIP (IP数据库) - 切换到 Loyalsoldier/geoip
+      # 任务二：构建 GeoIP (IP数据库) - 改进版
       # ------------------------------------------------------------------------
       - name: Checkout Loyalsoldier/geoip
         uses: actions/checkout@v4
@@ -80,27 +79,35 @@ jobs:
 
       - name: Prepare GeoIP Config & Data
         run: |
-          # 1. 准备目录结构 (对应 config 中的路径)
+          # 1. 准备目录结构
           mkdir -p ./geoip-src/geolite2
           
-          # 2. 下载并解压 ASN CSV
+          # 2. 下载并解压 ASN CSV (用于提取 Bytedance)
           echo "Downloading MaxMind ASN CSV..."
           wget -O temp_asn.zip "https://github.com/Loyalsoldier/geoip/raw/refs/heads/release/GeoLite2-ASN-CSV.zip"
           unzip -q temp_asn.zip -d temp_unzip
           
-          # 3. 移动 CSV 文件到 ./geolite2/ 目录
+          # 3. 移动 CSV 文件
           BD_DIR=$(find temp_unzip -maxdepth 1 -type d -name "GeoLite2-ASN-CSV_*")
           mv "$BD_DIR/GeoLite2-ASN-Blocks-IPv4.csv" ./geoip-src/geolite2/
           mv "$BD_DIR/GeoLite2-ASN-Blocks-IPv6.csv" ./geoip-src/geolite2/
           rm -rf temp_asn.zip temp_unzip
 
           # 4. 生成 config.json
-          # 使用 maxmindGeoLite2ASNCSV 提取 Bytedance
-          # 使用 text 引用 DustinWin 的在线 URL (防止本地文件路径问题)
+          # [核心修改]: 使用 v2rayGeoIPDat 直接读取上游 dat 文件
+          # 仅提取需要的 tag: cn, private, media, games, telegram
           echo "Generating config.json..."
           cat <<EOF > ./geoip-src/config.json
           {
             "input": [
+              {
+                "type": "v2rayGeoIPDat",
+                "action": "add",
+                "args": {
+                  "uri": "https://github.com/DustinWin/geoip/releases/download/mihomo-geodata/geoip.dat",
+                  "wantedList": ["cn", "private", "media", "games", "telegram"]
+                }
+              },
               {
                 "type": "maxmindGeoLite2ASNCSV",
                 "action": "add",
@@ -111,12 +118,7 @@ jobs:
                     "bytedance": ["396986"]
                   }
                 }
-              },
-              { "type": "text", "action": "add", "args": { "name": "cn", "uri": "${ips_download_url}/cnip.list" } },
-              { "type": "text", "action": "add", "args": { "name": "private", "uri": "${ips_download_url}/privateip.list" } },
-              { "type": "text", "action": "add", "args": { "name": "media", "uri": "${ips_download_url}/mediaip.list" } },
-              { "type": "text", "action": "add", "args": { "name": "games", "uri": "${ips_download_url}/gamesip.list" } },
-              { "type": "text", "action": "add", "args": { "name": "telegram", "uri": "${ips_download_url}/telegramip.list" } }
+              }
             ],
             "output": [
               {
@@ -135,7 +137,6 @@ jobs:
         run: |
           cd ./geoip-src
           # 5. 编译运行
-          # Loyalsoldier/geoip 的用法是 convert -c config.json
           echo "Compiling geoip.dat..."
           go run ./ convert -c config.json
           cd ..
@@ -166,8 +167,9 @@ jobs:
             修改: cn (追加 custom direct)
             
             [GeoIP]
-            包含: cn, private, media, games, telegram
-            新增: bytedance (ASN: 396986, via maxmindGeoLite2ASNCSV)
+            基础规则源: DustinWin/geoip (mihomo-geodata)
+            包含 Tag: cn, private, media, games, telegram
+            新增 Tag: bytedance (ASN: 396986, via GeoLite2-ASN)
           file_glob: true
           file: ./publish/*
 
