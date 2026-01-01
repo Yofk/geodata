@@ -69,7 +69,7 @@ jobs:
           cd ..
 
       # ------------------------------------------------------------------------
-      # 任务二：构建 GeoIP (IP数据库) - 改进版
+      # 任务二：构建 GeoIP (IP数据库)
       # ------------------------------------------------------------------------
       - name: Checkout Loyalsoldier/geoip
         uses: actions/checkout@v4
@@ -82,7 +82,7 @@ jobs:
           # 1. 准备目录结构
           mkdir -p ./geoip-src/geolite2
           
-          # 2. 下载并解压 ASN CSV (用于提取 Bytedance)
+          # 2. 下载并解压 ASN CSV (用于提取 Bytedance 和 Valve)
           echo "Downloading MaxMind ASN CSV..."
           wget -O temp_asn.zip "https://github.com/Loyalsoldier/geoip/raw/refs/heads/release/GeoLite2-ASN-CSV.zip"
           unzip -q temp_asn.zip -d temp_unzip
@@ -94,8 +94,7 @@ jobs:
           rm -rf temp_asn.zip temp_unzip
 
           # 4. 生成 config.json
-          # [核心修改]: 使用 v2rayGeoIPDat 直接读取上游 dat 文件
-          # 仅提取需要的 tag: cn, private, media, games, telegram
+          # [修改点]: 在 wantedList 中添加了 "valve": ["32590"]
           echo "Generating config.json..."
           cat <<EOF > ./geoip-src/config.json
           {
@@ -115,7 +114,8 @@ jobs:
                   "ipv4": "./geolite2/GeoLite2-ASN-Blocks-IPv4.csv",
                   "ipv6": "./geolite2/GeoLite2-ASN-Blocks-IPv6.csv",
                   "wantedList": {
-                    "bytedance": ["396986"]
+                    "bytedance": ["396986"],
+                    "valve": ["32590"]
                   }
                 }
               }
@@ -169,7 +169,7 @@ jobs:
             [GeoIP]
             基础规则源: DustinWin/geoip (mihomo-geodata)
             包含 Tag: cn, private, media, games, telegram
-            新增 Tag: bytedance (ASN: 396986, via GeoLite2-ASN)
+            新增 Tag: bytedance (ASN: 396986), valve (ASN: 32590)
           file_glob: true
           file: ./publish/*
 
