@@ -72,65 +72,101 @@ jobs:
       # ------------------------------------------------------------------------
       # 任务二：构建 GeoIP (IP数据库)
       # ------------------------------------------------------------------------
-      - name: Checkout v2fly/geoip
+      # [关键修改] 使用 Loyalsoldier/geoip 仓库，它支持 config.json 和 CSV 读取功能
+      - name: Checkout Loyalsoldier/geoip
         uses: actions/checkout@v4
         with:
-          repository: v2fly/geoip
+          repository: Loyalsoldier/geoip
           path: geoip-src
 
       - name: Generate Custom `geoip.dat`
         run: |
-          # 1. 准备目录
+          # 1. 准备目录结构
+          # Loyalsoldier 的 config.json 中可以使用相对路径引用这些文件
           mkdir -p ./geoip-src/data
-          rm -f ./geoip-src/data/*
+          mkdir -p ./geoip-src/geolite2
 
-          # 2. 下载基础文本规则 (来源: DustinWin)
+          # 2. 下载基础规则 (来源: DustinWin)
+          # 注意：Loyalsoldier 支持本地文件路径，只要uri写对即可
           echo "Downloading base IP lists..."
-          wget -O ./geoip-src/data/cn "${ips_download_url}/cnip.list"
-          wget -O ./geoip-src/data/private "${ips_download_url}/privateip.list"
-          wget -O ./geoip-src/data/media "${ips_download_url}/mediaip.list"
-          wget -O ./geoip-src/data/games "${ips_download_url}/gamesip.list"
-          wget -O ./geoip-src/data/telegram "${ips_download_url}/telegramip.list"
+          wget -O ./geoip-src/data/cn.txt "${ips_download_url}/cnip.list"
+          wget -O ./geoip-src/data/private.txt "${ips_download_url}/privateip.list"
+          wget -O ./geoip-src/data/media.txt "${ips_download_url}/mediaip.list"
+          wget -O ./geoip-src/data/games.txt "${ips_download_url}/gamesip.list"
+          wget -O ./geoip-src/data/telegram.txt "${ips_download_url}/telegramip.list"
 
-          # 3. 处理 Bytedance ASN 数据 (核心修改)
-          echo "Processing Bytedance ASN Data..."
+          # 3. 下载并准备 MaxMind ASN CSV 数据 (用于 Bytedance)
+          echo "Downloading MaxMind ASN CSV..."
+          wget -O ./temp_asn.zip "https://github.com/Loyalsoldier/geoip/raw/refs/heads/release/GeoLite2-ASN-CSV.zip"
+          unzip -q ./temp_asn.zip -d ./temp_unzip
           
-          # 下载 ZIP
-          wget -O temp_asn.zip "https://github.com/Loyalsoldier/geoip/raw/refs/heads/release/GeoLite2-ASN-CSV.zip"
-          # 解压到临时目录
-          unzip -q temp_asn.zip -d temp_unzip
+          # 找到解压后的文件夹
+          BD_DIR=$(find ./temp_unzip -maxdepth 1 -type d -name "GeoLite2-ASN-CSV_*")
           
-          # 动态查找 CSV 文件位置（无论文件夹名带什么日期）
-          CSV_V4=$(find temp_unzip -name "GeoLite2-ASN-Blocks-IPv4.csv" | head -n 1)
-          CSV_V6=$(find temp_unzip -name "GeoLite2-ASN-Blocks-IPv6.csv" | head -n 1)
-          
-          if [ -z "$CSV_V4" ] || [ -z "$CSV_V6" ]; then
-            echo "Error: Could not find CSV files extracted from zip."
-            exit 1
-          fi
-
-          echo "Found CSV files: $CSV_V4, $CSV_V6"
-          
-          # 提取 ASN 为 396986 的行，提取第一列(IP段)，写入目标文件
-          # 注意：v2fly/geoip 的 text 加载器只支持纯 IP/CIDR 列表
-          awk -F, '$2 == "396986" {print $1}' "$CSV_V4" > ./geoip-src/data/bytedance
-          awk -F, '$2 == "396986" {print $1}' "$CSV_V6" >> ./geoip-src/data/bytedance
+          # 将 CSV 移动到 config.json 预期的位置
+          mv "$BD_DIR/GeoLite2-ASN-Blocks-IPv4.csv" ./geoip-src/geolite2/ipv4.csv
+          mv "$BD_DIR/GeoLite2-ASN-Blocks-IPv6.csv" ./geoip-src/geolite2/ipv6.csv
           
           # 清理临时文件
-          rm -rf temp_asn.zip temp_unzip
+          rm -rf ./temp_asn.zip ./temp_unzip
 
-          # 4. 生成 config.json (全部使用 text 类型)
-          # 这样 100% 兼容 v2fly/geoip 官方源码
+          # 4. 生成 Loyalsoldier 格式的 config.json
+          # 重点：使用了 maxmindGeoLite2ASNCSV 类型，并指向了步骤3中准备好的文件
           echo "Generating config.json..."
           cat <<EOF > ./geoip-src/config.json
           {
             "input": [
-              { "type": "text", "action": "add", "args": { "name": "cn", "uri": "data/cn" } },
-              { "type": "text", "action": "add", "args": { "name": "private", "uri": "data/private" } },
-              { "type": "text", "action": "add", "args": { "name": "media", "uri": "data/media" } },
-              { "type": "text", "action": "add", "args": { "name": "games", "uri": "data/games" } },
-              { "type": "text", "action": "add", "args": { "name": "telegram", "uri": "data/telegram" } },
-              { "type": "text", "action": "add", "args": { "name": "bytedance", "uri": "data/bytedance" } }
+              {
+                "type": "text",
+                "action": "add",
+                "args": {
+                  "name": "cn",
+                  "uri": "data/cn.txt"
+                }
+              },
+              {
+                "type": "text",
+                "action": "add",
+                "args": {
+                  "name": "private",
+                  "uri": "data/private.txt"
+                }
+              },
+              {
+                "type": "text",
+                "action": "add",
+                "args": {
+                  "name": "media",
+                  "uri": "data/media.txt"
+                }
+              },
+              {
+                "type": "text",
+                "action": "add",
+                "args": {
+                  "name": "games",
+                  "uri": "data/games.txt"
+                }
+              },
+              {
+                "type": "text",
+                "action": "add",
+                "args": {
+                  "name": "telegram",
+                  "uri": "data/telegram.txt"
+                }
+              },
+              {
+                "type": "maxmindGeoLite2ASNCSV",
+                "action": "add",
+                "args": {
+                  "ipv4": "./geolite2/ipv4.csv",
+                  "ipv6": "./geolite2/ipv6.csv",
+                  "wantedList": {
+                    "bytedance": ["396986"]
+                  }
+                }
+              }
             ],
             "output": [
               {
@@ -145,9 +181,10 @@ jobs:
           }
           EOF
 
-          # 5. 编译 geoip
+          # 5. 编译 geoip.dat
           cd ./geoip-src
           echo "Compiling geoip.dat..."
+          # Loyalsoldier/geoip 使用 -c 参数加载配置文件
           go run ./ -c config.json
           cd ..
 
@@ -177,8 +214,9 @@ jobs:
             修改: cn (追加 custom direct)
             
             [GeoIP]
+            构建引擎: Loyalsoldier/geoip
             包含: cn, private, media, games, telegram
-            新增: bytedance (ASN: 396986, extracted from CSV)
+            新增: bytedance (ASN: 396986, using maxmindGeoLite2ASNCSV)
           file_glob: true
           file: ./publish/*
 
