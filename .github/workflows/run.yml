@@ -39,19 +39,14 @@ jobs:
 
       - name: Generate Custom `geosite.dat`
         run: |
-          # 1. 创建数据目录
           mkdir -p ./community/mydata/
-          
-          # 2. 定义基础规则列表 (已添加 tiktok, youtube)
           archs=(private ads trackerslist microsoft-cn apple-cn google-cn games-cn media games ai networktest tld-proxy gfw proxy cn tiktok youtube)
 
-          # 3. 下载上游规则并转换格式
           for arch in "${archs[@]}"; do
             echo "Downloading ${arch}..."
             curl -sSL "${domains_download_url}/${arch}.list" | sed -e 's/DOMAIN,/full:/' -e 's/DOMAIN-SUFFIX,//' -e 's/DOMAIN-KEYWORD,/keyword:/' -e 's/DOMAIN-REGEX,/regexp:/' > "./community/mydata/${arch}"
           done
 
-          # 4. 处理 fakeip-filter
           echo "Processing fakeip-filter..."
           curl -sSL "${domains_download_url}/fakeip-filter.list" | awk '!/^DOMAIN-REGEX,/' | sed -e 's/DOMAIN,/full:/' -e 's/DOMAIN-SUFFIX,//' > ./community/mydata/fakeip-filter
           cat <<EOF >> ./community/mydata/fakeip-filter
@@ -61,18 +56,15 @@ jobs:
           EOF
           curl -sSL "${domains_download_url}/fakeip-filter.list" | awk '/^DOMAIN-REGEX,/ && !/ntp|stun|time/' | sed 's/DOMAIN-REGEX,/regexp:/' >> ./community/mydata/fakeip-filter
 
-          # 5. 生成 'download' 规则
           echo "Generating custom 'download' rule..."
           curl -sSL "https://ruleset.skk.moe/Clash/domainset/download.txt" | sed 's/+\.//g' > ./temp_download_1
           curl -sSL "https://mihomo.deng2z.xyz/config/download.txt" | sed 's/+\.//g' > ./temp_download_2
           cat ./temp_download_1 ./temp_download_2 > ./community/mydata/download
           rm ./temp_download_1 ./temp_download_2
           
-          # 6. 修改 'cn' 规则 (追加 custom direct)
           echo "Appending custom direct list to 'cn' rule..."
           curl -sSL "https://mihomo.deng2z.xyz/config/direct.txt" | sed 's/+\.//g' >> ./community/mydata/cn
 
-          # 7. 编译 geosite (确保文件名为 geosite.dat)
           cd ./community/
           go run ./ --datapath=./mydata/ --outputname geosite.dat
           cd ..
@@ -88,11 +80,11 @@ jobs:
 
       - name: Generate Custom `geoip.dat`
         run: |
-          # 准备数据目录
+          # 1. 准备目录
           mkdir -p ./geoip-src/data
-          rm -f ./geoip-src/data/*
-
-          # 1. 下载基础规则 (来源: DustinWin)
+          mkdir -p ./geoip-src/maxmind_data
+          
+          # 2. 下载基础文本规则 (来源: DustinWin)
           echo "Downloading base IP lists..."
           wget -O ./geoip-src/data/cn "${ips_download_url}/cnip.list"
           wget -O ./geoip-src/data/private "${ips_download_url}/privateip.list"
@@ -100,31 +92,61 @@ jobs:
           wget -O ./geoip-src/data/games "${ips_download_url}/gamesip.list"
           wget -O ./geoip-src/data/telegram "${ips_download_url}/telegramip.list"
 
-          # 2. 生成 'bytedance' 规则
-          echo "Generating 'bytedance' rule from ASN 396986..."
+          # 3. 下载并解压 ASN CSV 文件 (用于 Bytedance)
+          echo "Downloading and preparing MaxMind CSV data..."
+          wget -O temp_asn.zip "https://github.com/Loyalsoldier/geoip/raw/refs/heads/release/GeoLite2-ASN-CSV.zip"
+          unzip -q temp_asn.zip -d temp_unzip
           
-          # 创建临时目录
-          mkdir -p ./temp_bd
+          # 动态查找解压后的文件夹名称
+          BD_DIR=$(find temp_unzip -maxdepth 1 -type d -name "GeoLite2-ASN-CSV_*")
           
-          # 下载并解压到 ./temp_bd/ 目录
-          wget -O ./temp_bd/GeoLite2-ASN-CSV.zip "https://github.com/Loyalsoldier/geoip/raw/refs/heads/release/GeoLite2-ASN-CSV.zip"
-          unzip -q ./temp_bd/GeoLite2-ASN-CSV.zip -d ./temp_bd/
-          
-          # 查找解压后的文件夹路径（应对日期变化）
-          BD_DIR=$(find ./temp_bd -type d -name "GeoLite2-ASN-CSV_*")
-          
-          # 直接提取并写入到 geoip-src/data/bytedance (修复了路径问题)
-          echo "Extracting IPs to ./geoip-src/data/bytedance..."
-          awk -F, '$2 == "396986" {print $1}' "$BD_DIR/GeoLite2-ASN-Blocks-IPv4.csv" > ./geoip-src/data/bytedance
-          awk -F, '$2 == "396986" {print $1}' "$BD_DIR/GeoLite2-ASN-Blocks-IPv6.csv" >> ./geoip-src/data/bytedance
+          # 将 CSV 文件移动到固定位置，方便 config.json 引用
+          mv "$BD_DIR/GeoLite2-ASN-Blocks-IPv4.csv" ./geoip-src/maxmind_data/ipv4.csv
+          mv "$BD_DIR/GeoLite2-ASN-Blocks-IPv6.csv" ./geoip-src/maxmind_data/ipv6.csv
           
           # 清理临时文件
-          rm -rf ./temp_bd
-          
-          # 3. 编译 geoip
+          rm -rf temp_asn.zip temp_unzip
+
+          # 4. 生成 config.json 配置文件
+          # 注意：这里使用了 maxmindGeoLite2ASNCSV 类型直接读取 CSV
+          echo "Generating config.json..."
+          cat <<EOF > ./geoip-src/config.json
+          {
+            "input": [
+              { "type": "text", "action": "add", "args": { "name": "cn", "uri": "data/cn" } },
+              { "type": "text", "action": "add", "args": { "name": "private", "uri": "data/private" } },
+              { "type": "text", "action": "add", "args": { "name": "media", "uri": "data/media" } },
+              { "type": "text", "action": "add", "args": { "name": "games", "uri": "data/games" } },
+              { "type": "text", "action": "add", "args": { "name": "telegram", "uri": "data/telegram" } },
+              {
+                "type": "maxmindGeoLite2ASNCSV",
+                "action": "add",
+                "args": {
+                  "ipv4": "maxmind_data/ipv4.csv",
+                  "ipv6": "maxmind_data/ipv6.csv",
+                  "wantedList": {
+                    "bytedance": ["396986"]
+                  }
+                }
+              }
+            ],
+            "output": [
+              {
+                "type": "v2rayGeoIPDat",
+                "action": "output",
+                "args": {
+                  "outputName": "geoip.dat",
+                  "outputDir": "."
+                }
+              }
+            ]
+          }
+          EOF
+
+          # 5. 编译 geoip
           cd ./geoip-src
-          echo "Compiling geoip.dat..."
-          go run ./ --datapath=./data/ --outputname=geoip.dat
+          echo "Compiling geoip.dat with config..."
+          go run ./ -c config.json
           cd ..
 
       # ------------------------------------------------------------------------
@@ -133,9 +155,7 @@ jobs:
       - name: Prepare Assets
         run: |
           mkdir -p ./publish/
-          # 移动生成的 geosite.dat
           mv ./community/geosite.dat ./publish/
-          # 移动生成的 geoip.dat
           mv ./geoip-src/geoip.dat ./publish/
 
       - name: Release and Upload Assets
@@ -156,7 +176,7 @@ jobs:
             
             [GeoIP]
             包含: cn, private, media, games, telegram
-            新增: bytedance (ASN: 396986)
+            新增: bytedance (ASN: 396986, using maxmindGeoLite2ASNCSV)
           file_glob: true
           file: ./publish/*
 
