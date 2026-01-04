@@ -39,7 +39,7 @@ jobs:
       - name: Generate Custom `geosite.dat`
         run: |
           mkdir -p ./community/mydata/
-          archs=(private ads trackerslist microsoft-cn apple-cn google-cn games-cn media games ai networktest tld-proxy gfw proxy cn tiktok youtube)
+          archs=(private microsoft-cn apple-cn google-cn games-cn media games ai proxy cn tiktok youtube)
 
           for arch in "${archs[@]}"; do
             echo "Downloading ${arch}..."
